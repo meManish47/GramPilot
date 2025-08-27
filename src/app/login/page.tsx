@@ -1,14 +1,38 @@
 "use client";
-import { generateToken } from "@/services/jwt";
+import { gqlClient } from "@/services/graphql";
+import { gql } from "graphql-request";
 import Image from "next/image";
+import Link from "next/link";
 import { useState } from "react";
 import { BsGoogle } from "react-icons/bs";
-
+import { toast } from "sonner";
+const LOGIN_USER = gql`
+  query LoginUser($email: String!, $password: String!) {
+    loginUser(email: $email, password: $password) {
+      success
+      message
+    }
+  }
+`;
 export default function LoginPage() {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
+    setLoading(true);
     e.preventDefault();
-    await generateToken(email);
+    const data: { loginUser: { success: boolean; message: string } } =
+      await gqlClient.request(LOGIN_USER, { email, password });
+    const res = data.loginUser;
+    console.log("responese ", res);
+    if (res.success) {
+      toast.success(res.message);
+      window.location.href = "/";
+      setLoading(false);
+    } else {
+      setLoading(false);
+      toast.error(res.message);
+    }
   }
   return (
     <main className="">
@@ -39,13 +63,20 @@ export default function LoginPage() {
               <input
                 type="password"
                 placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 className="w-full p-3 border text-black border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
               />
               <button
                 className="w-full bg-[#01A3FF] text-white py-3 rounded-lg font-semibold cursor-pointer hover:opacity-90 active:scale-95 
-                 transition-all duration-200 ease-in-out"
+                 transition-all duration-200 ease-in-out disabled:bg-[#4cb7f5]  disabled:cursor-not-allowed disabled:pointer-events-none"
+                disabled={loading}
               >
-                Login
+                {loading ? (
+                  <span className="loading loading-bars loading-md"></span>
+                ) : (
+                  "Log In"
+                )}
               </button>
             </form>
             <p className="text-sm text-gray-500 mt-4 text-center">
@@ -65,9 +96,9 @@ export default function LoginPage() {
             </button>
             <p className="text-sm text-gray-600 mt-6 text-center">
               Dont have an account?{" "}
-              <a href="/signup" className="text-purple-600">
+              <Link href="/signup" className="text-purple-600">
                 Sign up
-              </a>
+              </Link>
             </p>
           </div>
         </div>
