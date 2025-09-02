@@ -13,9 +13,15 @@ export async function GET(req: NextRequest) {
     new URLSearchParams({
       client_id: process.env.FB_APP_ID!,
       redirect_uri: process.env.NEXT_PUBLIC_FB_REDIRECT_URI!,
-      state: userId,
-      scope:
-        "pages_show_list,instagram_basic,instagram_manage_insights,pages_read_engagement",
+      state: userId, // pass your userId to identify later
+      scope: [
+        "pages_show_list",
+        "pages_manage_posts",
+        "pages_read_engagement",
+        "instagram_basic",
+        "instagram_manage_insights",
+        "instagram_content_publish",
+      ].join(","),
       response_type: "code",
     });
 

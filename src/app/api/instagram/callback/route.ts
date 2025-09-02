@@ -8,7 +8,6 @@ export async function GET(req: NextRequest) {
   const state = searchParams.get("state"); // logged-in userId passed as state
 
   if (!code || !state) {
-    console.error("DEBUG: Missing required params", { code, state });
     return NextResponse.json(
       { error: "Missing code or state" },
       { status: 400 }
@@ -16,8 +15,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // 1. Exchange code for short-lived token
-    console.log("DEBUG: Requesting short-lived token with code:", code);
+    // 1. Exchange code → short-lived token
     const tokenRes = await fetch(
       `https://graph.facebook.com/v21.0/oauth/access_token?` +
         new URLSearchParams({
@@ -25,21 +23,13 @@ export async function GET(req: NextRequest) {
           client_secret: process.env.FB_APP_SECRET!,
           redirect_uri: process.env.NEXT_PUBLIC_FB_REDIRECT_URI!,
           code,
-        }),
-      { method: "GET" }
+        })
     );
-
     const tokenData = await tokenRes.json();
-    console.log("DEBUG: Short-lived token response:", tokenData);
-
     if (tokenData.error) throw new Error(JSON.stringify(tokenData.error));
-    const shortLivedToken = tokenData.access_token as string;
+    const shortLivedToken = tokenData.access_token;
 
-    // 2. Exchange short-lived for long-lived token
-    console.log(
-      "DEBUG: Requesting long-lived token with short token:",
-      shortLivedToken
-    );
+    // 2. Exchange short → long-lived token
     const longTokenRes = await fetch(
       `https://graph.facebook.com/v21.0/oauth/access_token?` +
         new URLSearchParams({
@@ -47,63 +37,49 @@ export async function GET(req: NextRequest) {
           client_id: process.env.FB_APP_ID!,
           client_secret: process.env.FB_APP_SECRET!,
           fb_exchange_token: shortLivedToken,
-        }),
-      { method: "GET" }
+        })
     );
-
     const longTokenData = await longTokenRes.json();
-    console.log("DEBUG: Long-lived token response:", longTokenData);
+    if (longTokenData.error) throw new Error(JSON.stringify(longTokenData.error));
 
-    if (longTokenData.error)
-      throw new Error(JSON.stringify(longTokenData.error));
-    const longLivedToken = longTokenData.access_token as string;
-    const expiresIn = longTokenData.expires_in as number;
-
-    // 3. Get connected FB Pages
-    console.log("DEBUG: Requesting pages with token:", longLivedToken);
-    const igRes = await fetch(
-      `https://graph.facebook.com/v21.0/me/accounts?access_token=${longLivedToken}`,
-      { method: "GET" }
-    );
-
-    const igData = await igRes.json();
-    // console.log("DEBUG: Pages response:", igData);
-
-    if (igData.error) throw new Error(JSON.stringify(igData.error));
-    const page = igData.data?.[0];
-    if (!page) {
-      // console.error("DEBUG: No FB pages linked to this account");
-      throw new Error("No connected Instagram account found.");
-    }
-
-    // 4. Get Instagram Business account linked to that page
-    console.log("DEBUG: Requesting IG business account for page:", page.id);
-    const igAccountRes = await fetch(
-      `https://graph.facebook.com/v21.0/${page.id}?fields=instagram_business_account&access_token=${longLivedToken}`,
-      { method: "GET" }
-    );
-
-    const igAccountData = await igAccountRes.json();
-    // console.log(
-    //   `DEBUG: IG account response for page ${page.id}:`,
-    //   igAccountData
-    // );
-
-    if (igAccountData.error)
-      throw new Error(JSON.stringify(igAccountData.error));
-    const igId = igAccountData.instagram_business_account?.id;
-    if (!igId) {
-      console.error(
-        "DEBUG: Page exists but no IG account linked",
-        igAccountData
-      );
-      throw new Error("No Instagram business account linked.");
-    }
-
-    // 5. Save/Update IG account in DB
+    const longLivedToken = longTokenData.access_token;
+    const expiresIn = longTokenData.expires_in;
     const expiresAt = new Date(Date.now() + expiresIn * 1000);
-    console.log("DEBUG: Saving IG account in DB", { igId, state, expiresAt });
 
+    // 3. Debug permissions (super useful for checking scopes)
+    const debugRes = await fetch(
+      `https://graph.facebook.com/debug_token?` +
+        new URLSearchParams({
+          input_token: longLivedToken,
+          access_token: `${process.env.FB_APP_ID}|${process.env.FB_APP_SECRET}`,
+        })
+    );
+    const debugData = await debugRes.json();
+    console.log("DEBUG: Token permissions", debugData);
+
+    // 4. Get Pages for the user
+    const pagesRes = await fetch(
+      `https://graph.facebook.com/v21.0/me/accounts?access_token=${longLivedToken}`
+    );
+    const pagesData = await pagesRes.json();
+    if (pagesData.error) throw new Error(JSON.stringify(pagesData.error));
+
+    const page = pagesData.data?.[0];
+    if (!page) throw new Error("No connected Facebook page found.");
+
+    // 5. Get Instagram account linked to that Page
+    const igRes = await fetch(
+      `https://graph.facebook.com/v21.0/${page.id}?fields=instagram_business_account&access_token=${longLivedToken}`
+    );
+    const igData = await igRes.json();
+    if (igData.error) throw new Error(JSON.stringify(igData.error));
+
+    const igId = igData.instagram_business_account?.id;
+    if (!igId) {
+      throw new Error("No Instagram business account linked to this Page.");
+    }
+
+    // 6. Save or update IG account in DB
     const saved = await prismaClient.instagramAccount.upsert({
       where: { igId },
       update: {
@@ -118,15 +94,13 @@ export async function GET(req: NextRequest) {
         userId: state,
       },
     });
+    console.log("DEBUG: Saved IG account in DB", saved);
 
-    console.log("DEBUG: DB save success", saved);
-
-    // 6. Redirect user back
+    // 7. Redirect back to your frontend
     const redirectUrl = `${process.env.NEXT_PUBLIC_APP_BASE}/instagram-connected?ig_id=${igId}`;
-    console.log("DEBUG: Redirecting to:", redirectUrl);
     return NextResponse.redirect(redirectUrl);
   } catch (err) {
-    console.error("IG callback error:", (err as Error).message || err);
+    console.error("IG callback error:", (err as Error).message);
     return NextResponse.json(
       { error: (err as Error).message },
       { status: 500 }
