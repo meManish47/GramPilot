@@ -1,6 +1,6 @@
 import { ThemeProvider } from "@/components/theme-provider";
 import type { Metadata } from "next";
-import "./globals.css";
+import "../globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import HeaderComponent from "@/components/header/header";
 
@@ -24,6 +24,7 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          <HeaderComponent />
           {children}
           <Toaster richColors />
         </ThemeProvider>
